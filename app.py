@@ -9,12 +9,54 @@ import time
 import concurrent.futures
 import asyncio
 import httpx
+import sys
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor
 
 st.set_page_config(
     page_title="Анализ температур",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+def compute_rolling_stats(group):
+    rolling_window = 30
+    group = group.copy().sort_values('timestamp')
+    group['скользящее_среднее'] = group['temperature'].rolling(window=rolling_window, min_periods=1).mean()
+    group['скользящее_стандартноеОтклонение'] = group['temperature'].rolling(window=rolling_window, min_periods=1).std()
+    group['верхняя_граница'] = group['скользящее_среднее'] + 2 * group['скользящее_стандартноеОтклонение']
+    group['нижняя_граница'] = group['скользящее_среднее'] - 2 * group['скользящее_стандартноеОтклонение']
+    group['аномалия'] = (group['temperature'] > group['верхняя_граница']) | (group['temperature'] < group['нижняя_граница'])
+    return group
+
+async def compare_fetch_methods(cities, api_key):
+    async_times = []
+    sync_times = []
+
+    # Тест асинхронного метода
+    start = time.time()
+    async with httpx.AsyncClient() as client:
+        tasks = [client.get("https://api.openweathermap.org/data/2.5/weather", 
+                           params={"q": city, "appid": api_key, "units": "metric"}) 
+                for city in cities]
+        responses = await asyncio.gather(*tasks)
+    async_time = time.time() - start
+    async_times.append(async_time)
+    
+    # Тест синхронного метода
+    start = time.time()
+    for city in cities:
+        requests.get("https://api.openweathermap.org/data/2.5/weather", 
+                    params={"q": city, "appid": api_key, "units": "metric"})
+    sync_time = time.time() - start
+    sync_times.append(sync_time)
+
+    # Отображение результатов
+    st.write(f"Асинхронный метод: {async_time:.3f} сек")
+    st.write(f"Синхронный метод: {sync_time:.3f} сек")
+    st.write(f"Ускорение: x{sync_time/max(async_time, 0.001):.1f}")
+    
+    return async_times, sync_times
 
 # Стили для оформления заголовков и карточек
 st.markdown("""
@@ -89,6 +131,20 @@ with st.sidebar:
     
     st.subheader("Метод получения текущей температуры")
     fetch_method = st.radio("Выберите метод", ("Синхронный", "Асинхронный"))
+    if st.checkbox("Сравнить производительность методов"):
+        if not api_key:
+            st.error("Для сравнения методов требуется API-ключ!")
+        else:
+            test_cities = ["Berlin", "Moscow", "Beijing", "Dubai", "Cairo"]
+            with st.spinner("Тестируем методы..."):
+                try:
+                    asyncio.run(compare_fetch_methods(test_cities, api_key))
+                except Exception as e:
+                    if "401" in str(e):
+                        st.error("Неверный API-ключ! Проверьте корректность ключа [подробнее](https://openweathermap.org/faq#error401)")
+                    else:
+                        st.error(f"Ошибка тестирования: {str(e)}")
+        
     
     st.subheader("Сравнение производительности анализа")
     parallel_compare = st.checkbox("Сравнить последовательный и параллельный расчёт для всех городов")
@@ -98,49 +154,45 @@ with st.sidebar:
             "Выберите метод параллельных вычислений", 
             ("ThreadPoolExecutor", "multiprocessing")
         )
-        
-        def compute_rolling_stats(df_city):
-            # Расчёт скользящего среднего, стандартного отклонения и границ
-            df_city = df_city.sort_values("timestamp")
-            df_city['скользящее_среднее'] = df_city['temperature'].rolling(window=30, min_periods=1).mean()
-            df_city['скользящее_стандартноеОтклонение'] = df_city['temperature'].rolling(window=30, min_periods=1).std()
-            df_city['верхняя_граница'] = df_city['скользящее_среднее'] + 2 * df_city['скользящее_стандартноеОтклонение']
-            df_city['нижняя_граница'] = df_city['скользящее_среднее'] - 2 * df_city['скользящее_стандартноеОтклонение']
-            df_city['аномалия'] = (df_city['temperature'] > df_city['верхняя_граница']) | (df_city['temperature'] < df_city['нижняя_граница'])
-            return df_city
 
         start_seq = time.time()
         sequential_result = df.groupby('city').apply(lambda group: compute_rolling_stats(group.copy()))
         time_seq = time.time() - start_seq
-        
+
         if parallel_method == "ThreadPoolExecutor":
             from concurrent.futures import ThreadPoolExecutor
             start_par = time.time()
             with ThreadPoolExecutor() as executor:
-                futures = [executor.submit(compute_rolling_stats, group.copy()) for _, group in df.groupby('city')]
+                futures = [executor.submit(compute_rolling_stats, group.copy()) 
+                         for _, group in df.groupby('city')]
                 parallel_result = [f.result() for f in futures]
             parallel_df = pd.concat(parallel_result)
             time_par = time.time() - start_par
         else:
-            # На Windows multiprocessing в Streamlit может работать нестабильно.
-            st.warning("Multiprocessing может работать нестабильно в данной среде. Рекомендуется использовать ThreadPoolExecutor.")
-            parallel_df = sequential_result.copy()
-            time_par = 0
-        
+            start_par = time.time()
+            with ProcessPoolExecutor() as executor:
+                futures = [executor.submit(compute_rolling_stats, group.copy()) 
+                         for _, group in df.groupby('city')]
+                parallel_result = [f.result() for f in futures]
+            parallel_df = pd.concat(parallel_result)
+            time_par = time.time() - start_par
+
+            if sys.platform.startswith('win'):
+                st.warning("""
+                На Windows multiprocessing может иметь большие накладные расходы. 
+                Для небольших данных параллелизм может быть менее эффективен.
+                """)
+
         st.write(f"Последовательный расчёт: {time_seq:.3f} сек")
-        st.write(f"Параллельный расчёт (метод {parallel_method}): {time_par:.3f} сек")
+        st.write(f"Параллельный расчёт ({parallel_method}): {time_par:.3f} сек")
+        st.write(f"Ускорение: x{time_seq/max(time_par, 0.001):.1f}")
 
 # Отбор данных по выбранному городу и периоду
 city_data = df[(df["city"] == selected_city) & (df["timestamp"].dt.date >= start_date) & (df["timestamp"].dt.date <= end_date)].copy()
 city_data.sort_values("timestamp", inplace=True)
 
-#Скользящие статистики и границы определения аномалий.
-rolling_window = 30
-city_data['скользящее_среднее'] = city_data['temperature'].rolling(window=rolling_window, min_periods = 1).mean()
-city_data['скользящее_стандартноеОтклонение'] = city_data['temperature'].rolling(window=rolling_window, min_periods = 1).std()
-city_data['верхняя_граница'] = city_data['скользящее_среднее'] + 2 * city_data['скользящее_стандартноеОтклонение']
-city_data['нижняя_граница'] = city_data['скользящее_среднее'] - 2 * city_data['скользящее_стандартноеОтклонение']
-city_data['аномалия'] = (city_data['temperature'] > city_data['верхняя_граница']) | (city_data['temperature'] < city_data['нижняя_граница'])
+# Применение функции compute_rolling_stats для вычисления скользящих статистик и определения аномалий
+city_data = compute_rolling_stats(city_data.copy())
 
 # Группировка данных для получения сезонной статистики
 seasonal_stats = df.groupby(['city', 'season'])['temperature'].agg(['mean', 'std']).reset_index()
@@ -202,7 +254,7 @@ with tab1:
             labels={"season_rus": "Сезон", "mean": "Средняя температура", "std": "Отклонение (σ)"},
             title=f"Сезонные профили температуры для {selected_city}",
             text="mean",
-            category_orders={"season_rus": ["зима", "весна", "осень", "лето"]}
+            category_orders={"season_rus": ["зима", "весна", "лето", "осень"]}
         )
         fig_season.update_traces(texttemplate='%{text:.1f}', textposition='outside')
         st.plotly_chart(fig_season, use_container_width=True)
@@ -228,10 +280,18 @@ with tab2:
 
 # Асинхронная функция для запроса текущей температуры через httpx
 async def fetch_current_temp_async(city, api_key):
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=10.0) as client:
         params = {"q": city, "appid": api_key, "units": "metric"}
-        response = await client.get("https://api.openweathermap.org/data/2.5/weather", params=params)
-        return response
+        try:
+            response = await client.get("https://api.openweathermap.org/data/2.5/weather", params=params)
+            response.raise_for_status()
+            return response
+        except httpx.HTTPStatusError as e:
+            st.error(f"Ошибка API: {e.response.status_code} - {e.response.text}")
+            return None
+        except httpx.RequestError as e:
+            st.error(f"Ошибка соединения: {str(e)}")
+            return None
 
 with tab3:
     st.markdown("<h2 class='subheader'>Мониторинг текущей температуры</h2>", unsafe_allow_html=True)
@@ -255,7 +315,7 @@ with tab3:
                 else:
                     response = asyncio.run(fetch_current_temp_async(selected_city, api_key))
                     
-            if response.status_code == 200:
+            if response is not None and response.status_code == 200:
                 current_data = response.json()
                 current_temp = current_data['main']['temp']
                 
@@ -303,7 +363,7 @@ with tab3:
                         else:
                             st.success("Температура в пределах исторической нормы")
                     else:
-                        st.warning("Нет исторических данных для текущего сезона")
+                        st.warning("Недостаточно данных для сравнения с текущим сезоном")
                     st.markdown("</div>", unsafe_allow_html=True)
             else:
                 try:
@@ -318,3 +378,4 @@ with tab3:
             st.error(f"Ошибка при получении данных: {str(e)}")
     else:
         st.info("Введите API ключ в боковой панели для просмотра текущей температуры")
+    

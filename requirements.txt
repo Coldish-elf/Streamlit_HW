@@ -5,3 +5,8 @@ requests
 plotly
 numpy
 httpx
+multiprocessing
+sys
+concurrent.futures
+multiprocess==0.70.14
+httpx==0.24.1
