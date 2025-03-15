@@ -127,7 +127,18 @@ with st.sidebar:
     st.subheader("API для текущих данных")
     api_key = st.text_input("OpenWeatherMap API ключ", type="password")
     if api_key:
-        st.info("API ключ введен ✓")
+        try:
+            test_response = requests.get(
+                "https://api.openweathermap.org/data/2.5/weather",
+                params={"q": "Moscow", "appid": api_key, "units": "metric"},
+                timeout=5
+            )
+            if test_response.status_code == 200:
+                st.info("API ключ введен ✓")
+            else:
+                st.error("Неверный API ключ!")
+        except Exception as e:
+            st.error(f"Ошибка при проверке API ключа: {str(e)}")
     
     st.subheader("Метод получения текущей температуры")
     fetch_method = st.radio("Выберите метод", ("Синхронный", "Асинхронный"))
