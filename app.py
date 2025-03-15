@@ -171,7 +171,6 @@ with st.sidebar:
         time_seq = time.time() - start_seq
 
         if parallel_method == "ThreadPoolExecutor":
-            from concurrent.futures import ThreadPoolExecutor
             start_par = time.time()
             with ThreadPoolExecutor() as executor:
                 futures = [executor.submit(compute_rolling_stats, group.copy()) 
@@ -368,11 +367,11 @@ with tab3:
                         upper_bound_season = seasonal_mean + 2 * seasonal_std
                         
                         if current_temp < lower_bound_season:
-                            st.error("Текущая температура НИЖЕ исторической нормы!")
+                            st.error("Текущая температура НИЖЕ климатической нормы!")
                         elif current_temp > upper_bound_season:
-                            st.error("Текущая температура ВЫШЕ исторической нормы!")
+                            st.error("Текущая температура ВЫШЕ климатической нормы!")
                         else:
-                            st.success("Температура в пределах исторической нормы")
+                            st.success("Температура в пределах климатической нормы")
                     else:
                         st.warning("Недостаточно данных для сравнения с текущим сезоном")
                     st.markdown("</div>", unsafe_allow_html=True)
@@ -380,7 +379,9 @@ with tab3:
                 try:
                     err_data = response.json()
                     if response.status_code == 401 and "Invalid API key" in err_data.get("message", ""):
-                        st.error(f"401: {err_data.get('message', 'Неверный API ключ. Подробнее: https://openweathermap.org/faq#error401')}") 
+                        st.error(f"401: {err_data.get('message', 'Неверный API ключ. Подробнее: https://openweathermap.org/faq#error401')}")
+                    elif response.status_code == 404:
+                        st.error("Как ты умудрился ты тут 404 получить? А так: Город не найден. Проверьте корректность названия города.")
                     else:
                         st.error(f"Ошибка API: {response.status_code}. {err_data.get('message','')}")
                 except Exception:
@@ -389,4 +390,3 @@ with tab3:
             st.error(f"Ошибка при получении данных: {str(e)}")
     else:
         st.info("Введите API ключ в боковой панели для просмотра текущей температуры")
-    
