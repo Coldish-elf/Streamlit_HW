@@ -21,7 +21,6 @@ from .time_series_tab import time_series_tab
 from .anomalies_tab import anomalies_tab
 from .monitoring_tab import monitoring_tab
 from .heatmap_tab import heatmap_tab
-from .export_data_tab import export_data_tab
 
 def run_app():
     st.set_page_config(
@@ -87,18 +86,31 @@ def run_app():
         coeffs = np.polyfit(city_data['timestamp_ordinal'], city_data['temperature'], 1)
         city_data['тренд'] = np.polyval(coeffs, city_data['timestamp_ordinal'])
 
-    # Вкладки
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Временной ряд", "Аномалии", "Текущий мониторинг", "Тепловая карта", "Экспорт данных"])
-    with tab1:
+    # Создаем вкладки и отслеживаем их состояние
+    tab_names = ["Временной ряд", "Аномалии", "Текущий мониторинг", "Тепловая карта"]
+    tabs = st.tabs(tab_names)
+    
+    # Определяем индекс активной вкладки
+    if "active_tab" not in st.session_state:
+        st.session_state.active_tab = 0
+    
+    # Отрисовываем содержимое вкладок
+    with tabs[0]:
         time_series_tab(city_data, selected_city, start_date, end_date, seasonal_stats)
-    with tab2:
+        st.session_state.active_tab = 0
+    
+    with tabs[1]:
         anomalies_tab(city_data)
-    with tab3:
+        st.session_state.active_tab = 1
+    
+    with tabs[2]:
         monitoring_tab(api_key, selected_city, df, fetch_method)
-    with tab4:
+        st.session_state.active_tab = 2
+    
+    with tabs[3]:
+        st.session_state.active_tab = 3
+        # Теперь heatmap загружается только когда вкладка активна
         heatmap_tab(df, selected_city, start_date, end_date)
-    with tab5:
-        export_data_tab(df, city_data, seasonal_stats, selected_city)
 
 if __name__ == "__main__":
     run_app()
