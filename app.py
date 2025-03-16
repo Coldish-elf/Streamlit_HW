@@ -321,18 +321,19 @@ def monitoring_tab():
             with col1:
                 st.markdown("<div class='card'>", unsafe_allow_html=True)
                 st.metric("Текущая температура", f"{current_temp:.1f} °C")
-                current_season = map_season_to_rus(get_season(datetime.now().month))
+                current_season = map_season_to_rus(get_season(datetime.datetime.now().month))
                 st.write(f"Текущий сезон: {current_season}")
                 st.markdown("</div>", unsafe_allow_html=True)
 
             with col2:
                 st.markdown("<div class='card'>", unsafe_allow_html=True)
-                current_season_eng = get_season(datetime.now().month)
-                seasonal_data = city_data[city_data['season'] == current_season_eng]
+                current_season_eng = get_season(datetime.datetime.now().month)
+                current_city_data = df[df['city'] == selected_city]
+                seasonal_data = current_city_data[current_city_data['season'] == current_season_eng]
                 if not seasonal_data.empty:
                     seasonal_mean = seasonal_data['temperature'].mean()
                     seasonal_std = seasonal_data['temperature'].std()
-                    st.write(f"Историческая норма для сезона '{current_season}':")
+                    st.write(f"Норма для сезона '{current_season}':")
                     st.write(f"{seasonal_mean:.1f} °C ± {seasonal_std:.1f} °C")
                     lower_bound, upper_bound = seasonal_mean - 2 * seasonal_std, seasonal_mean + 2 * seasonal_std
                     if current_temp < lower_bound:
