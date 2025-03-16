@@ -5,6 +5,18 @@ from datetime import date, timedelta
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def prepare_heatmap_data(df, period_start, period_end, agg_frequency='D'):
+    """
+    Фильтрует и агрегирует данные о температурах за указанный период.
+
+    Аргументы:
+        df (pd.DataFrame): исходные данные о температуре.
+        period_start (date): начало периода.
+        period_end (date): конец периода.
+        agg_frequency (str): частота агрегации ('D', 'W-MON', 'MS').
+
+    Возвращает:
+        pd.DataFrame: агрегированные данные.
+    """
     filtered_df = df[(df['timestamp'].dt.date >= period_start) & 
                      (df['timestamp'].dt.date <= period_end)]
     
@@ -24,6 +36,15 @@ def prepare_heatmap_data(df, period_start, period_end, agg_frequency='D'):
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def create_pivot_table(agg_df):
+    """
+    Преобразует агрегированные данные в сводную таблицу (город против даты).
+
+    Аргументы:
+        agg_df (pd.DataFrame): агрегированные данные.
+
+    Возвращает:
+        pd.DataFrame: сводная таблица средних температур.
+    """
     pivot = agg_df.pivot_table(
         index='city',
         columns='date',
@@ -39,10 +60,32 @@ def create_pivot_table(agg_df):
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def calculate_stats(agg_df):
+    """
+    Вычисляет минимальную, среднюю и максимальную температуру для каждого города.
+
+    Аргументы:
+        agg_df (pd.DataFrame): агрегированные данные.
+
+    Возвращает:
+        pd.DataFrame: статистика температур по городам.
+    """
     return agg_df.groupby('city')['temperature'].agg(['min', 'mean', 'max']).round(1)
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def prepare_city_data(df, city_name, period_start, period_end, agg_frequency='D'):
+    """
+    Готовит агрегированные данные для выбранного города за заданный период.
+
+    Аргументы:
+        df (pd.DataFrame): исходные данные.
+        city_name (str): название города.
+        period_start (date): начало периода.
+        period_end (date): конец периода.
+        agg_frequency (str): частота агрегации.
+
+    Возвращает:
+        tuple: (агрегированные данные, минимальная дата, максимальная дата).
+    """
     city_df = df[df['city'] == city_name]
     
     if city_df.empty:
@@ -76,7 +119,16 @@ def prepare_city_data(df, city_name, period_start, period_end, agg_frequency='D'
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def prepare_city_data_by_day_month_year(df, city_name):
-    """Prepare city data for showing day-month on x-axis and years on y-axis"""
+    """
+    Готовит данные для тепловой карты по дням и месяцам для выбранного города.
+
+    Аргументы:
+        df (pd.DataFrame): исходные данные.
+        city_name (str): название города.
+
+    Возвращает:
+        pd.DataFrame или None: агрегированные данные по годам и дням, либо None.
+    """
     city_df = df[df['city'] == city_name]
     
     if city_df.empty:
@@ -90,6 +142,9 @@ def prepare_city_data_by_day_month_year(df, city_name):
     return city_agg
 
 def format_x_labels(dates, agg_frequency):
+    """
+    Форматирует подписи оси X для тепловой карты.
+    """
     if agg_frequency == 'D':
         return [dt.strftime("%d %b %Y") for dt in dates]
     elif agg_frequency == 'W-MON':
@@ -100,11 +155,24 @@ def format_x_labels(dates, agg_frequency):
         return [dt.strftime("%b %Y") for dt in dates]
 
 def to_date(timestamp_or_date):
+    """
+    Преобразует объект времени в дату, если это необходимо.
+    """
     if isinstance(timestamp_or_date, pd.Timestamp):
         return timestamp_or_date.date()
     return timestamp_or_date
 
 def heatmap_tab(df, selected_city, start_date, end_date):
+    """
+    Выводит тепловые карты для всех городов и отдельную тепловую карту для выбранного города.
+    Можно использовать агрегацию данных по датам.
+
+    Аргументы:
+        df (pd.DataFrame): исходные данные о температуре.
+        selected_city (str): выбранный город.
+        start_date (date): начало анализа.
+        end_date (date): конец анализа.
+    """
     st.markdown("<h2 class='subheader'>Тепловая карта</h2>", unsafe_allow_html=True)
     
     use_aggregation = st.radio(

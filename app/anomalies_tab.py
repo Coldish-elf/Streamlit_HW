@@ -3,9 +3,24 @@ import pandas as pd
 
 @st.cache_data
 def extract_anomalies(city_data):
+    """
+    Выбирает из данных только те строки, в которых зафиксирована аномалия.
+
+    Аргументы:
+        city_data (pd.DataFrame): данные о температуре с информацией об аномалиях.
+
+    Возвращает:
+        pd.DataFrame: данные, где присутствуют аномалии.
+    """
     return city_data[city_data['аномалия']][['timestamp', 'temperature']]
 
 def anomalies_tab(city_data):
+    """
+    Выводит таблицу с обнаруженными аномалиями, отсортированными по дате.
+
+    Аргументы:
+        city_data (pd.DataFrame): данные о температуре с отметками аномалий.
+    """
     st.markdown("<h2 class='subheader'>Обнаруженные аномалии</h2>", unsafe_allow_html=True)
     anomalies = extract_anomalies(city_data)
     if not anomalies.empty:

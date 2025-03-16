@@ -1,5 +1,6 @@
 """
-Анализ температурных данных и мониторинг текущей температуры через OpenWeatherMap API.
+Выводит анализ данных о температуре и мониторинг текущей температуры через API OpenWeatherMap.
+Настраивает страницу Streamlit с четырьмя вкладками: временной ряд, аномалии, мониторинг и тепловая карта.
 """
 import sys
 import time
@@ -23,6 +24,9 @@ from .monitoring_tab import monitoring_tab
 from .heatmap_tab import heatmap_tab
 
 def run_app():
+    """
+    Настраивает страницу Streamlit и выводит основные разделы приложения.
+    """
     st.set_page_config(
         page_title="Анализ температур",
         layout="wide",
@@ -86,11 +90,9 @@ def run_app():
         coeffs = np.polyfit(city_data['timestamp_ordinal'], city_data['temperature'], 1)
         city_data['тренд'] = np.polyval(coeffs, city_data['timestamp_ordinal'])
 
-    # Создаем вкладки и отслеживаем их состояние
     tab_names = ["Временной ряд", "Аномалии", "Текущий мониторинг", "Тепловая карта"]
     tabs = st.tabs(tab_names)
-    
-    # Определяем индекс активной вкладки
+
     if "active_tab" not in st.session_state:
         st.session_state.active_tab = 0
     

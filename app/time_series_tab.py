@@ -3,6 +3,17 @@ import plotly.express as px
 from .helper_functions import map_season_to_rus
 
 def time_series_tab(city_data, selected_city, start_date, end_date, seasonal_stats):
+    """
+    Выводит график временного ряда температур с расчетом скользящего среднего,
+    отображением границ и аномалий, а также выводит таблицу сезонной статистики.
+
+    Аргументы:
+        city_data (pd.DataFrame): данные о температуре для выбранного города.
+        selected_city (str): название выбранного города.
+        start_date (date): начало анализируемого периода.
+        end_date (date): конец анализируемого периода.
+        seasonal_stats (pd.DataFrame): сезонная статистика по городам.
+    """
     st.markdown("<h2 class='subheader'>Временной ряд температур</h2>", unsafe_allow_html=True)
     fig = px.line(
         city_data,

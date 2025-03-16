@@ -7,20 +7,39 @@ import time
 import sys
 
 def raw_process_group(group):
+    """
+    Возвращает копию группы данных без изменений.
+    """
     return group.copy()
 
 @st.cache_data
 def process_group(group):
+    """
+    Кэширует и возвращает копию группы данных.
+    """
     return group.copy()
 
 @st.cache_data
 def process_uploaded_file(df):
+    """
+    Преобразует столбец timestamp в дату и добавляет информацию о сезоне.
+    """
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     df['season'] = df['timestamp'].dt.month.apply(get_season)
     return df
 
 @st.cache_data
 def run_parallel_processing(df, parallel_method):
+    """
+    Выполняет параллельную обработку данных с использованием потоков или процессов.
+
+    Аргументы:
+        df (pd.DataFrame): данные для обработки.
+        parallel_method (str): выбранный метод ('ThreadPoolExecutor' или 'multiprocessing').
+
+    Возвращает:
+        float: время выполнения параллельной обработки.
+    """
     if parallel_method == "ThreadPoolExecutor":
         start_par = time.time()
         with ThreadPoolExecutor() as executor:
@@ -35,6 +54,10 @@ def run_parallel_processing(df, parallel_method):
         return time.time() - start_par
 
 def render_sidebar():
+    """
+    Выводит боковую панель с элементами загрузки данных, выбора города,
+    периода, ввода API ключа и тестирования параллельной обработки.
+    """
     st.sidebar.header("Панель управления")
     uploaded_file = st.sidebar.file_uploader("Загрузите собственный датасет (CSV)", type=["csv"])
     if uploaded_file:
