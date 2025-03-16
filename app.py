@@ -344,18 +344,23 @@ def monitoring_tab():
                     st.warning("Недостаточно данных для сравнения с текущим сезоном")
                 st.markdown("</div>", unsafe_allow_html=True)
         else:
-            try:
-                err_data = response.json()
-                if response.status_code == 401 and "Invalid API key" in err_data.get("message", ""):
-                    st.error(f"401: {err_data.get('message', 'Неверный API ключ. Проверьте корректность ключа [подробнее](https://openweathermap.org/faq#error401)')}")
-                elif response.status_code == 404:
-                    st.error("Город не найден. Проверьте корректность названия города.")
-                else:
-                    st.error(f"Ошибка API: {response.status_code}. {err_data.get('message','')}")
-            except Exception:
-                st.error(f"Ошибка API: {response.status_code}")
+            error_handled = True  # Set a flag to indicate we're handling the error
+            if response is None:
+                st.error("Не удалось получить ответ от API")
+            else:
+                try:
+                    err_data = response.json()
+                    if response.status_code == 401 and "Invalid API key" in err_data.get("message", ""):
+                        st.error(f"401. Invalid API key. Please see https://openweathermap.org/faq#error401 for more info.")
+                    elif response.status_code == 404:
+                        st.error("Город не найден. Проверьте корректность названия города.")
+                    else:
+                        st.error(f"Ошибка API: {response.status_code}. {err_data.get('message','')}")
+                except Exception:
+                    st.error(f"Ошибка API: {response.status_code}")
     except Exception as e:
-        st.error(f"Ошибка при получении данных: {str(e)}")
+        if not 'error_handled' in locals() or not error_handled:
+            st.error(f"Ошибка при получении данных: {str(e)}")
 
 # Layout
 
