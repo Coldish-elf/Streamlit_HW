@@ -441,12 +441,14 @@ def monitoring_tab():
 def heatmap_tab():
     """
     Отображение тепловой карты температур по городам за выбранный период.
-    Включает сводную статистику для каждого города.
+    Включает сводную статистику для каждого города, а также дополнительную тепловую карту
+    только для выбранного города и выбранного периода (если период не указан – используется весь период с данными).
     """
     st.markdown("<h2 class='subheader'>Тепловая карта</h2>", unsafe_allow_html=True)
     
-    period_start = st.date_input("Начало периода для тепловой карты", value=start_date)
-    period_end = st.date_input("Конец периода для тепловой карты", value=end_date)
+    # Тепловая карта по всем городам
+    period_start = st.date_input("Начало периода для тепловой карты (все города)", value=start_date, key="all_start")
+    period_end = st.date_input("Конец периода для тепловой карты (все города)", value=end_date, key="all_end")
     
     heatmap_data = df.copy()
     heatmap_data['date'] = pd.to_datetime(heatmap_data['timestamp']).dt.date
@@ -461,76 +463,178 @@ def heatmap_tab():
     ).round(1)
     if pivot_data.empty:
         st.warning("Недостаточно данных для построения тепловой карты в выбранном периоде")
+    else:
+        pivot_data = pivot_data.reindex(sorted(pivot_data.index), axis=0)
+        pivot_data = pivot_data.reindex(sorted(pivot_data.columns), axis=1)
+        x_labels = [date.strftime("%d %b %Y") for date in pivot_data.columns]
+        try:
+            selected_index = list(pivot_data.index).index(selected_city)
+        except ValueError:
+            selected_index = None
+        fig = px.imshow(
+            pivot_data.values,
+            labels=dict(x="Дата", y="Город", color="Температура (°C)"),
+            x=x_labels,
+            y=pivot_data.index,
+            color_continuous_scale='RdBu_r',
+            zmin=-30,
+            zmax=40,
+            aspect="auto"
+        )
+        # Применяем зум по оси X, если даты попадают в диапазон
+        start_zoom = datetime.date(2010, 1, 1)
+        end_zoom = datetime.date(2020, 12, 31)
+        dates = list(pivot_data.columns)
+        start_index = next((i for i, d in enumerate(dates) if d >= start_zoom), 0)
+        end_index = next((i for i, d in enumerate(dates) if d > end_zoom), len(dates)) - 1
+        fig.update_layout(
+            title="Тепловая карта температур по городам",
+            height=600,
+            xaxis=dict(
+                tickangle=-45,
+                tickmode="array",
+                tickvals=list(range(len(x_labels))),
+                ticktext=x_labels,
+                range=[start_index - 0.5, end_index + 0.5] if start_index < end_index else None
+            ),
+            coloraxis_colorbar=dict(
+                title="°C",
+                thicknessmode="pixels",
+                thickness=20,
+                lenmode="pixels", 
+                len=500
+            )
+        )
+        for i in range(1, len(pivot_data.index)):
+            fig.add_shape(
+                type="line",
+                x0=-0.5,
+                x1=len(x_labels)-0.5,
+                y0=i - 0.5,
+                y1=i - 0.5,
+                line=dict(color="black", width=1, dash="dash")
+            )
+        if selected_index is not None:
+            fig.add_shape(
+                type="rect",
+                x0=-0.5,
+                x1=len(x_labels) - 0.5,
+                y0=selected_index - 0.5,
+                y1=selected_index + 0.5,
+                line=dict(color="black", width=2),
+                opacity=1
+            )
+        st.plotly_chart(fig, use_container_width=True)
+    
+    st.markdown("### Статистика температур по городам")
+    stats_df = heatmap_data.groupby('city')['temperature'].agg(['min', 'mean', 'max']).round(1)
+    stats_df.columns = ['Минимум (°C)', 'Среднее (°C)', 'Максимум (°C)']
+    st.dataframe(stats_df, use_container_width=True)
+
+    # Дополнительная тепловая карта для выбранного города
+    st.markdown("<hr>", unsafe_allow_html=True)
+    st.markdown("<h2 class='subheader'>Тепловая карта для выбранного города</h2>", unsafe_allow_html=True)
+    
+    # Определяем доступный диапазон дат для выбранного города, если данные присутствуют
+    city_df = df[df['city'] == selected_city].copy()
+    if not city_df.empty:
+        city_df['date'] = pd.to_datetime(city_df['timestamp']).dt.date
+        city_min_date = city_df['date'].min()
+        city_max_date = city_df['date'].max()
+    else:
+        city_min_date, city_max_date = start_date, end_date
+
+    city_period_start = st.date_input("Начало периода для выбранного города", value=city_min_date, key="city_start")
+    city_period_end = st.date_input("Конец периода для выбранного города", value=city_max_date, key="city_end")
+    
+    city_heat_data = city_df.copy()
+    city_date_mask = (city_heat_data['date'] >= city_period_start) & (city_heat_data['date'] <= city_period_end)
+    city_heat_data = city_heat_data[city_date_mask]
+    
+    if city_heat_data.empty:
+        st.warning("Недостаточно данных для выбранного города в выбранном периоде")
         return
-    pivot_data = pivot_data.reindex(sorted(pivot_data.index), axis=0)
-    pivot_data = pivot_data.reindex(sorted(pivot_data.columns), axis=1)
-    x_labels = [date.strftime("%d %b %Y") for date in pivot_data.columns]
-    try:
-        selected_index = list(pivot_data.index).index(selected_city)
-    except ValueError:
-        selected_index = None
-    fig = px.imshow(
-        pivot_data.values,
+
+    # Построение сводной таблицы для выбранного города
+    pivot_city = city_heat_data.pivot_table(
+        index='city',
+        columns='date',
+        values='temperature',
+        aggfunc='mean'
+    ).round(1)
+    pivot_city = pivot_city.reindex(sorted(pivot_city.columns), axis=1)
+    x_labels_city = [date.strftime("%d %b %Y") for date in pivot_city.columns]
+    
+    fig_city = px.imshow(
+        pivot_city.values,
         labels=dict(x="Дата", y="Город", color="Температура (°C)"),
-        x=x_labels,
-        y=pivot_data.index,
+        x=x_labels_city,
+        y=pivot_city.index,
         color_continuous_scale='RdBu_r',
         zmin=-30,
         zmax=40,
         aspect="auto"
     )
-    start_zoom = datetime.date(2010, 1, 1)
-    end_zoom = datetime.date(2020, 12, 31)
-    dates = list(pivot_data.columns)
-    start_index = next((i for i, d in enumerate(dates) if d >= start_zoom), 0)
-    end_index = next((i for i, d in enumerate(dates) if d > end_zoom), len(dates)) - 1
-    fig.update_layout(
-        title="Тепловая карта температур по городам",
-        height=600,
+    fig_city.update_layout(
+        title=f"Тепловая карта для города {selected_city}",
+        height=300,
         xaxis=dict(
             tickangle=-45,
             tickmode="array",
-            tickvals=list(range(len(x_labels))),
-            ticktext=x_labels,
-            range=[start_index - 0.5, end_index + 0.5] if start_index < end_index else None
+            tickvals=list(range(len(x_labels_city))),
+            ticktext=x_labels_city
         ),
         coloraxis_colorbar=dict(
             title="°C",
             thicknessmode="pixels",
             thickness=20,
             lenmode="pixels", 
-            len=500
+            len=300
         )
     )
-    for i in range(1, len(pivot_data.index)):
-        fig.add_shape(
-            type="line",
-            x0=-0.5,
-            x1=len(x_labels)-0.5,
-            y0=i - 0.5,
-            y1=i - 0.5,
-            line=dict(color="black", width=1, dash="dash")
-        )
-    if selected_index is not None:
-        fig.add_shape(
-            type="rect",
-            x0=-0.5,
-            x1=len(x_labels) - 0.5,
-            y0=selected_index - 0.5,
-            y1=selected_index + 0.5,
-            line=dict(color="black", width=2),
-            opacity=1
-        )
-    st.plotly_chart(fig, use_container_width=True)
-    st.markdown("### Статистика температур по городам")
-    stats_df = heatmap_data.groupby('city')['temperature'].agg(['min', 'mean', 'max']).round(1)
-    stats_df.columns = ['Минимум (°C)', 'Среднее (°C)', 'Максимум (°C)']
-    st.dataframe(stats_df, use_container_width=True)
+    st.plotly_chart(fig_city, use_container_width=True)
+    
+    st.markdown("### Статистика температур для выбранного города")
+    city_stats = city_heat_data['temperature'].agg(['min', 'mean', 'max']).round(1)
+    stats_city_df = pd.DataFrame(city_stats).transpose()
+    stats_city_df.columns = ['Минимум (°C)', 'Среднее (°C)', 'Максимум (°C)']
+    st.dataframe(stats_city_df, use_container_width=True)
 
+def export_data_tab(full_df: pd.DataFrame, city_df: pd.DataFrame, seasonal_df: pd.DataFrame, selected_city: str) -> None:
+    """
+    Отображает вкладку экспорта данных, предоставляя кнопки для скачивания полного датасета,
+    данных по выбранному городу, сезонных статистик и тепловой карты в формате CSV.
+
+    Параметры:
+        city_df (pd.DataFrame): Датасет с данными для выбранного города.
+        seasonal_df (pd.DataFrame): Сезонные статистики для всех городов.
+        selected_city (str): Название выбранного города.
+    """
+    st.markdown("<h2 class='subheader'>Экспорт данных</h2>", unsafe_allow_html=True)
+    
+    def convert_df_to_csv(df: pd.DataFrame) -> bytes:
+        return df.to_csv(index=False).encode('utf-8')
+    
+    csv_city = convert_df_to_csv(city_df)
+    st.download_button(
+        label=f"Скачать данные по городу {selected_city} (CSV)",
+        data=csv_city,
+        file_name=f"temperature_data_{selected_city}.csv",
+        mime="text/csv"
+    )
+    
+    csv_seasonal = convert_df_to_csv(seasonal_df)
+    st.download_button(
+        label="Скачать сезонные статистики (CSV)",
+        data=csv_seasonal,
+        file_name="seasonal_statistics.csv",
+        mime="text/csv"
+    )
+    
 # ----------------------- Основа -----------------------
 
 # Создание четырех вкладок для различных отображений
-tab1, tab2, tab3, tab4 = st.tabs(["Временной ряд", "Аномалии", "Текущий мониторинг", "Тепловая карта"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["Временной ряд", "Аномалии", "Текущий мониторинг", "Тепловая карта", "Экспорт данных"])
 with tab1:
     time_series_tab()
 with tab2:
@@ -539,3 +643,5 @@ with tab3:
     monitoring_tab()
 with tab4:
     heatmap_tab()
+with tab5:
+    export_data_tab(df, city_data, seasonal_stats, selected_city)
