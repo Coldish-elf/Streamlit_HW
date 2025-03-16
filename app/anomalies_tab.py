@@ -10,7 +10,7 @@ def anomalies_tab(city_data):
     anomalies = extract_anomalies(city_data)
     if not anomalies.empty:
         anomalies = anomalies.sort_values('timestamp', ascending=False)
-        anomalies['дата'] = anomalies['timestamp'].dt.strftime('%d.%м.%Y')
+        anomalies['дата'] = anomalies['timestamp'].dt.strftime('%d.%m.%Y')
         has_time_data = not all(anomalies['timestamp'].dt.time == pd.Timestamp('00:00:00').time())
         if has_time_data:
             anomalies['время'] = anomalies['timestamp'].dt.strftime('%H:%M')
