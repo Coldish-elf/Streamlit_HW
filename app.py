@@ -14,15 +14,19 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from datetime import datetime, timedelta
 import datetime
 
+# Настройка страницы Streamlit
 st.set_page_config(
     page_title="Анализ температур",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Helper Functions
+# ----------------------- Вспомогательные функции -----------------------
 
 def get_season(month: int) -> str:
+    """
+    Возвращение названий времен года по числовому значению.
+    """
     if month in [12, 1, 2]:
         return 'winter'
     if month in [3, 4, 5]:
@@ -32,6 +36,10 @@ def get_season(month: int) -> str:
     return 'autumn'
 
 def load_csv_data(path: str) -> pd.DataFrame:
+    """
+    Загружает CSV данные из указанного пути.
+    Преобразует столбец 'timestamp' в формат datetime и добавляет столбец 'season'.
+    """
     df = pd.read_csv(path)
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     df['season'] = df['timestamp'].dt.month.apply(get_season)
@@ -39,9 +47,19 @@ def load_csv_data(path: str) -> pd.DataFrame:
 
 @st.cache_data
 def load_default_data() -> pd.DataFrame:
+    """
+    Загружает стандартный датасет при отсутствии загрузки пользовательского файла.
+    Результаты кэшируются для ускорения работы.
+    """
     return load_csv_data("temperature_data.csv")
 
 def compute_rolling_stats(group: pd.DataFrame) -> pd.DataFrame:
+    """
+    Вычисляет скользящие статистики, такие как среднее, стандартное отклонение,
+    а также границы для обнаружения аномалий для данных конкретного города.
+    rolling_window: размер окна для расчёта скользящих статистик.
+    aномалия считается, если значение температуры вне установленных границ.
+    """
     rolling_window = 30
     group = group.sort_values('timestamp').copy()
     group['скользящее_среднее'] = group['temperature'].rolling(window=rolling_window, min_periods=1).mean()
@@ -52,26 +70,46 @@ def compute_rolling_stats(group: pd.DataFrame) -> pd.DataFrame:
     return group
 
 async def compare_fetch_methods(cities: list, api_key: str):
+    """
+    Сравнение производительности синхронного и асинхронного методов получения данных через API.
+    1. Асинхронный:
+       Использует httpx.AsyncClient и asyncio.gather для одновременных запросов.
+    2. Синхронный:
+       Последовательно делает запросы через requests.get.
+       
+    Результат: время выполнения каждого метода и отношение ускорения.
+    """
     start = time.time()
     async with httpx.AsyncClient() as client:
-        tasks = [client.get("https://api.openweathermap.org/data/2.5/weather", 
-                            params={"q": city, "appid": api_key, "units": "metric"}) 
-                 for city in cities]
+        tasks = [
+            client.get(
+                "https://api.openweathermap.org/data/2.5/weather",
+                params={"q": city, "appid": api_key, "units": "metric"}
+            )
+            for city in cities
+        ]
         await asyncio.gather(*tasks)
     async_time = time.time() - start
 
     start = time.time()
     for city in cities:
-        requests.get("https://api.openweathermap.org/data/2.5/weather", 
-                     params={"q": city, "appid": api_key, "units": "metric"})
+        requests.get(
+            "https://api.openweathermap.org/data/2.5/weather",
+            params={"q": city, "appid": api_key, "units": "metric"}
+        )
     sync_time = time.time() - start
 
     st.write(f"Асинхронный метод: {async_time:.3f} сек")
     st.write(f"Синхронный метод: {sync_time:.3f} сек")
     st.write(f"Ускорение: x{sync_time / max(async_time, 0.001):.1f}")
+    # Асинхронный метод быстрее для нескольких городов благодаря параллельным запросам.
     return async_time, sync_time
 
 async def fetch_current_temp_async(city: str, api_key: str):
+    """
+    Асинхронное получение текущей температуры для города через OpenWeatherMap API.
+    Использует библиотеку httpx для асинхронного запроса и обрабатывает ошибки.
+    """
     async with httpx.AsyncClient(timeout=10.0) as client:
         params = {"q": city, "appid": api_key, "units": "metric"}
         try:
@@ -85,6 +123,9 @@ async def fetch_current_temp_async(city: str, api_key: str):
     return None
 
 def test_api_key(api_key: str) -> bool:
+    """
+    Проверка корректности API ключа путем запроса для города "Moscow".
+    """
     try:
         response = requests.get(
             "https://api.openweathermap.org/data/2.5/weather",
@@ -100,10 +141,13 @@ def test_api_key(api_key: str) -> bool:
     return False
 
 def map_season_to_rus(season: str) -> str:
+    """
+    Преобразует название сезона с английского на русский.
+    """
     season_map = {'winter': 'зима', 'spring': 'весна', 'summer': 'лето', 'autumn': 'осень'}
     return season_map.get(season, season)
 
-# CSS Style
+# ----------------------- Стилизация страницы -----------------------
 
 st.markdown("""
 <style>
@@ -130,7 +174,7 @@ st.markdown("""
 
 st.markdown("<h1 class='main-header'>Анализ температурных данных и мониторинг текущей температуры через OpenWeatherMap API</h1>", unsafe_allow_html=True)
 
-# Sidebar
+# ----------------------- Боковая панель -----------------------
 
 with st.sidebar:
     st.header("Панель управления")
@@ -181,6 +225,7 @@ with st.sidebar:
     parallel_compare = st.checkbox("Сравнить последовательный и параллельный расчёт для всех городов")
     if parallel_compare:
         parallel_method = st.radio("Выберите метод параллельных вычислений", ("ThreadPoolExecutor", "multiprocessing"))
+        
         start_seq = time.time()
         sequential_result = df.groupby('city').apply(lambda group: compute_rolling_stats(group.copy()))
         time_seq = time.time() - start_seq
@@ -200,14 +245,17 @@ with st.sidebar:
             parallel_df = pd.concat(parallel_result)
             time_par = time.time() - start_par
             if sys.platform.startswith('win'):
-                st.warning("На Windows multiprocessing может иметь большие накладные расходы для небольших данных.")
+                st.warning("На Windows multiprocessing может иметь большие расходы для небольших данных.")
 
         st.write(f"Последовательный расчёт: {time_seq:.3f} сек")
         st.write(f"Параллельный расчёт ({parallel_method}): {time_par:.3f} сек")
         st.write(f"Ускорение: x{time_seq / max(time_par, 0.001):.1f}")
-
-# Data Preparation
-
+        """
+        Вывод: ThreadPoolExecutor часто быстрее для задач с I/O, как эта, в то время как multiprocessing
+        может быть медленнее на Windows из-за накладных расходов на создание процессов. Для больших данных
+        multiprocessing может быть полезен для CPU-интенсивных задач.
+        """
+# ----------------------- Подготовка данных -----------------------
 mask = (
     (df["city"] == selected_city) &
     (df["timestamp"].dt.date >= start_date) &
@@ -216,17 +264,23 @@ mask = (
 city_data = df.loc[mask].sort_values("timestamp").copy()
 city_data = compute_rolling_stats(city_data)
 
+# Вычисление сезонной статистики для каждого города
 seasonal_stats = df.groupby(['city', 'season'])['temperature'].agg(['mean', 'std']).reset_index()
 
+# Добавление трендовой линии, если данные присутсвуют
 if not city_data.empty:
     city_data = city_data.sort_values("timestamp")
     city_data['timestamp_ordinal'] = city_data['timestamp'].apply(lambda x: x.toordinal())
     coeffs = np.polyfit(city_data['timestamp_ordinal'], city_data['temperature'], 1)
     city_data['тренд'] = np.polyval(coeffs, city_data['timestamp_ordinal'])
 
-# Tab Definitions
+# ----------------------- Вкладки сайта -----------------------
 
 def time_series_tab():
+    """
+    Отображение графика временного ряда со скользящими статистиками, трендом и аномалиями.
+    Также показывает сезонные статистики для выбранного города.
+    """
     st.markdown("<h2 class='subheader'>Временной ряд температур</h2>", unsafe_allow_html=True)
     fig = px.line(
         city_data,
@@ -283,6 +337,10 @@ def time_series_tab():
         st.plotly_chart(fig_season, use_container_width=True)
 
 def anomalies_tab():
+    """
+    Отображение таблицы обнаруженных температурных аномалий для выбранного города.
+    Включает информацию о времени, если она доступна в данных.
+    """
     st.markdown("<h2 class='subheader'>Обнаруженные аномалии</h2>", unsafe_allow_html=True)
     anomalies = city_data[city_data['аномалия']][['timestamp', 'temperature']]
     if not anomalies.empty:
@@ -307,6 +365,10 @@ def anomalies_tab():
         st.success("В выбранном периоде аномалии не обнаружены")
 
 def monitoring_tab():
+    """
+    Отображение тепловой карты температур по городам за выбранный период.
+    Включает сводную статистику для каждого города.
+    """
     st.markdown("<h2 class='subheader'>Мониторинг текущей температуры</h2>", unsafe_allow_html=True)
     if not api_key or not test_api_key(api_key):
         st.info("Введите корректный API ключ в боковой панели для просмотра текущей температуры")
@@ -374,6 +436,10 @@ def monitoring_tab():
             st.error(f"Ошибка при получении данных: {str(e)}")
 
 def heatmap_tab():
+    """
+    Вкладка "Тепловая карта" строит карту температур по городам за выбранный период.
+    Также выводит сводную таблицу с основной статистикой для каждого города.
+    """
     st.markdown("<h2 class='subheader'>Тепловая карта</h2>", unsafe_allow_html=True)
     
     period_start = st.date_input("Начало периода для тепловой карты", value=start_date)
@@ -458,7 +524,9 @@ def heatmap_tab():
     stats_df.columns = ['Минимум (°C)', 'Среднее (°C)', 'Максимум (°C)']
     st.dataframe(stats_df, use_container_width=True)
 
-# Main App
+# ----------------------- Основа -----------------------
+
+# Создаем четыре вкладки для визуализации данных
 tab1, tab2, tab3, tab4 = st.tabs(["Временной ряд", "Аномалии", "Текущий мониторинг", "Тепловая карта"])
 with tab1:
     time_series_tab()
