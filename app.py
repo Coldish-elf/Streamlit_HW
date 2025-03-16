@@ -1,27 +1,25 @@
+"""
+Анализ температурных данных и мониторинг текущей температуры через OpenWeatherMap API.
+"""
+import sys
+import time
+from datetime import timedelta, date, datetime
 import asyncio
-import concurrent.futures
+
 import httpx
-import multiprocessing
+import requests
 import numpy as np
 import pandas as pd
 import plotly.express as px
-import requests
-import sys
-import time
-import altair as alt
-import streamlit as st
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
-from datetime import datetime, timedelta
-import datetime
 
-# Настройка страницы Streamlit
+import streamlit as st
+
 st.set_page_config(
     page_title="Анализ температур",
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# ----------------------- Вспомогательные функции -----------------------
 
 def get_season(month: int) -> str:
     """
@@ -55,10 +53,8 @@ def load_default_data() -> pd.DataFrame:
 
 def compute_rolling_stats(group: pd.DataFrame) -> pd.DataFrame:
     """
-    Вычисление скользящий статистики, такие как среднее, стандартное отклонение,
-    а также границы для обнаружения аномалий для данных конкретного города.
-    rolling_window: размер окна для расчёта скользящих статистик.
-    aномалия считается, если значение температуры вне установленных границ.
+    Вычисление скользящей статистики (среднее, std, верхняя и нижняя граница)
+    и флаг аномалии (вне границ ±2σ).
     """
     rolling_window = 30
     group = group.sort_values('timestamp').copy()
@@ -66,25 +62,26 @@ def compute_rolling_stats(group: pd.DataFrame) -> pd.DataFrame:
     group['скользящее_стандартноеОтклонение'] = group['temperature'].rolling(window=rolling_window, min_periods=1).std()
     group['верхняя_граница'] = group['скользящее_среднее'] + 2 * group['скользящее_стандартноеОтклонение']
     group['нижняя_граница'] = group['скользящее_среднее'] - 2 * group['скользящее_стандартноеОтклонение']
-    group['аномалия'] = (group['temperature'] > group['верхняя_граница']) | (group['temperature'] < group['нижняя_граница'])
+    group['аномалия'] = (group['temperature'] > group['верхняя_граница']) | (
+        group['temperature'] < group['нижняя_граница']
+    )
     return group
 
 async def compare_fetch_methods(cities: list, api_key: str):
     """
     Сравнение производительности синхронного и асинхронного методов получения данных через API.
-    1. Асинхронный:
-       Использует httpx.AsyncClient и asyncio.gather для одновременных запросов.
-    2. Синхронный:
-       Последовательно делает запросы через requests.get.
-       
-    Результат: время выполнения каждого метода и отношение ускорения.
+    Возвращает время выполнения каждого метода и отношение ускорения.
     """
     start = time.time()
     async with httpx.AsyncClient() as client:
         tasks = [
             client.get(
                 "https://api.openweathermap.org/data/2.5/weather",
-                params={"q": city, "appid": api_key, "units": "metric"}
+                params={
+                    "q": city,
+                    "appid": api_key,
+                    "units": "metric"
+                }
             )
             for city in cities
         ]
@@ -95,34 +92,44 @@ async def compare_fetch_methods(cities: list, api_key: str):
     for city in cities:
         requests.get(
             "https://api.openweathermap.org/data/2.5/weather",
-            params={"q": city, "appid": api_key, "units": "metric"}
+            params={
+                "q": city,
+                "appid": api_key,
+                "units": "metric"
+            },
+            timeout=10
         )
     sync_time = time.time() - start
     col1, col2, col3 = st.columns(3)
     with col1:
         st.write(f"Асинхронный метод: {async_time:.3f} сек")
-    with col2:    
+    with col2:
         st.write(f"Синхронный метод: {sync_time:.3f} сек")
     with col3:
         st.write(f"Ускорение: x{sync_time / max(async_time, 0.001):.1f}")
-    # Асинхронный метод быстрее для нескольких городов благодаря параллельным запросам.
     return async_time, sync_time
 
 async def fetch_current_temp_async(city: str, api_key: str):
     """
     Асинхронное получение текущей температуры для города через OpenWeatherMap API.
-    Использует библиотеку httpx для асинхронного запроса и обрабатывает ошибки.
     """
     async with httpx.AsyncClient(timeout=10.0) as client:
-        params = {"q": city, "appid": api_key, "units": "metric"}
+        params = {
+            "q": city,
+            "appid": api_key,
+            "units": "metric"
+        }
         try:
-            response = await client.get("https://api.openweathermap.org/data/2.5/weather", params=params)
+            response = await client.get(
+                "https://api.openweathermap.org/data/2.5/weather",
+                params=params
+            )
             response.raise_for_status()
             return response
-        except httpx.HTTPStatusError as e:
-            st.error(f"Ошибка API: {e.response.status_code} - {e.response.text}")
-        except httpx.RequestError as e:
-            st.error(f"Ошибка соединения: {str(e)}")
+        except httpx.HTTPStatusError as exc:
+            st.error(f"Ошибка API: {exc.response.status_code} - {exc.response.text}")
+        except httpx.RequestError as exc:
+            st.error(f"Ошибка соединения: {exc}")
     return None
 
 def test_api_key(api_key: str) -> bool:
@@ -132,15 +139,20 @@ def test_api_key(api_key: str) -> bool:
     try:
         response = requests.get(
             "https://api.openweathermap.org/data/2.5/weather",
-            params={"q": "Moscow", "appid": api_key, "units": "metric"},
+            params={
+                "q": "Moscow",
+                "appid": api_key,
+                "units": "metric"
+            },
             timeout=5
         )
         if response.status_code == 200:
             st.info("API ключ введен ✓")
             return True
-        st.error("Неверный API ключ! Проверьте корректность ключа [подробнее](https://openweathermap.org/faq#error401)")
-    except Exception as e:
-        st.error(f"Ошибка при проверке API ключа: {str(e)}")
+        st.error("Неверный API ключ! Проверьте корректность ключа "
+                 "[подробнее](https://openweathermap.org/faq#error401)")
+    except Exception as exc:
+        st.error(f"Ошибка при проверке API ключа: {exc}")
     return False
 
 def map_season_to_rus(season: str) -> str:
@@ -150,38 +162,39 @@ def map_season_to_rus(season: str) -> str:
     season_map = {'winter': 'зима', 'spring': 'весна', 'summer': 'лето', 'autumn': 'осень'}
     return season_map.get(season, season)
 
-# ----------------------- Стилизация страницы -----------------------
+st.markdown(
+    """
+    <style>
+        .main-header {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #1E88E5;
+            text-align: center;
+        }
+        .subheader {
+            font-size: 1.5rem;
+            font-weight: 500;
+            color: #212121;
+        }
+        .card {
+            background-color: #f9f9f9;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 10px 0;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 2.5rem;
-        font-weight: 700;
-        color: #1E88E5;
-        text-align: center;
-    }
-    .subheader {
-        font-size: 1.5rem;
-        font-weight: 500;
-        color: #212121;
-    }
-    .card {
-        background-color: #f9f9f9;
-        border-radius: 10px;
-        padding: 20px;
-        margin: 10px 0;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    }
-</style>
-""", unsafe_allow_html=True)
-
-st.markdown("<h1 class='main-header'>Анализ температурных данных и мониторинг текущей температуры через OpenWeatherMap API</h1>", unsafe_allow_html=True)
-
-# ----------------------- Боковая панель -----------------------
+st.markdown(
+    "<h1 class='main-header'>Анализ температурных данных и мониторинг текущей температуры через OpenWeatherMap API</h1>",
+    unsafe_allow_html=True
+)
 
 with st.sidebar:
     st.header("Панель управления")
-
     uploaded_file = st.file_uploader("Загрузите собственный датасет (CSV)", type=["csv"])
     if uploaded_file:
         df = pd.read_csv(uploaded_file)
@@ -197,10 +210,10 @@ with st.sidebar:
     st.subheader("Выбор периода анализа")
     min_date = df['timestamp'].min().date()
     max_date = df['timestamp'].max().date()
-    col1, col2 = st.columns(2)
-    with col1:
+    col1_side, col2_side = st.columns(2)
+    with col1_side:
         start_date = st.date_input("Начало периода", min_date)
-    with col2:
+    with col2_side:
         end_date = st.date_input("Конец периода", max_date)
 
     st.subheader("API для текущих данных")
@@ -218,17 +231,20 @@ with st.sidebar:
             with st.spinner("Тестируем методы..."):
                 try:
                     asyncio.run(compare_fetch_methods(test_cities, api_key))
-                except Exception as e:
-                    if "401" in str(e):
-                        st.error("Неверный API-ключ! Проверьте корректность ключа [подробнее](https://openweathermap.org/faq#error401)")
+                except Exception as exc:
+                    if "401" in str(exc):
+                        st.error(
+                            "Неверный API-ключ! "
+                            "Проверьте корректность ключа [подробнее](https://openweathermap.org/faq#error401)"
+                        )
                     else:
-                        st.error(f"Ошибка тестирования: {str(e)}")
+                        st.error(f"Ошибка тестирования: {str(exc)}")
 
     st.subheader("Сравнение производительности анализа")
     parallel_compare = st.checkbox("Сравнить последовательный и параллельный расчёт для всех городов")
     if parallel_compare:
         parallel_method = st.radio("Выберите метод параллельных вычислений", ("ThreadPoolExecutor", "multiprocessing"))
-        
+
         start_seq = time.time()
         sequential_result = df.groupby('city').apply(lambda group: compute_rolling_stats(group.copy()))
         time_seq = time.time() - start_seq
@@ -253,38 +269,29 @@ with st.sidebar:
         st.write(f"Последовательный расчёт: {time_seq:.3f} сек")
         st.write(f"Параллельный расчёт ({parallel_method}): {time_par:.3f} сек")
         st.write(f"Ускорение: x{time_seq / max(time_par, 0.001):.1f}")
-        
-        # Вывод: ThreadPoolExecutor часто быстрее для задач с I/O, как эта, в то время как multiprocessing
-        # может быть медленнее на Windows из-за накладных расходов на создание процессов. Для больших данных
-        # multiprocessing может быть полезен для CPU-интенсивных задач.
-        
-# ----------------------- Подготовка данных -----------------------
+
 mask = (
-    (df["city"] == selected_city) &
-    (df["timestamp"].dt.date >= start_date) &
-    (df["timestamp"].dt.date <= end_date)
+    (df["city"] == selected_city)
+    & (df["timestamp"].dt.date >= start_date)
+    & (df["timestamp"].dt.date <= end_date)
 )
 city_data = df.loc[mask].sort_values("timestamp").copy()
 city_data = compute_rolling_stats(city_data)
 
-# Вычисление сезонной статистики для каждого города
 seasonal_stats = df.groupby(['city', 'season'])['temperature'].agg(['mean', 'std']).reset_index()
 
-# Добавление трендовой линии, если данные присутсвуют
 if not city_data.empty:
     city_data = city_data.sort_values("timestamp")
     city_data['timestamp_ordinal'] = city_data['timestamp'].apply(lambda x: x.toordinal())
     coeffs = np.polyfit(city_data['timestamp_ordinal'], city_data['temperature'], 1)
     city_data['тренд'] = np.polyval(coeffs, city_data['timestamp_ordinal'])
 
-# ----------------------- Вкладки сайта -----------------------
-
 def time_series_tab():
     """
     Отображение графика временного ряда со скользящими статистиками, трендом и аномалиями.
-    Также показывает сезонные статистики для выбранного города.
     """
-    st.markdown("<h2 class='subheader'>Временной ряд температур</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 class='subheader'>Временной ряд температур</h2>",
+                unsafe_allow_html=True)
     fig = px.line(
         city_data,
         x='timestamp',
@@ -342,16 +349,13 @@ def time_series_tab():
 def anomalies_tab():
     """
     Отображение таблицы обнаруженных температурных аномалий для выбранного города.
-    Включает информацию о времени, если она доступна в данных.
     """
     st.markdown("<h2 class='subheader'>Обнаруженные аномалии</h2>", unsafe_allow_html=True)
     anomalies = city_data[city_data['аномалия']][['timestamp', 'temperature']]
     if not anomalies.empty:
         anomalies = anomalies.sort_values('timestamp', ascending=False)
         anomalies['дата'] = anomalies['timestamp'].dt.strftime('%d.%m.%Y')
-        
         has_time_data = not all(anomalies['timestamp'].dt.time == pd.Timestamp('00:00:00').time())
-        
         if has_time_data:
             anomalies['время'] = anomalies['timestamp'].dt.strftime('%H:%M')
             anomalies['температура'] = anomalies['temperature'].round(1).astype(str) + ' °C'
@@ -370,7 +374,7 @@ def anomalies_tab():
 def monitoring_tab():
     """
     Получение и отображение текущей температуры для выбранного города.
-    Сравнивает её с климатической сезонной нормой.
+    Сравнение с климатической сезонной нормой.
     """
     st.markdown("<h2 class='subheader'>Мониторинг текущей температуры</h2>", unsafe_allow_html=True)
     if not api_key or not test_api_key(api_key):
@@ -391,17 +395,17 @@ def monitoring_tab():
             current_data = response.json()
             current_temp = current_data['main']['temp']
 
-            col1, col2 = st.columns(2)
-            with col1:
+            col_mon_1, col_mon_2 = st.columns(2)
+            with col_mon_1:
                 st.markdown("<div class='card'>", unsafe_allow_html=True)
                 st.metric("Текущая температура", f"{current_temp:.1f} °C")
-                current_season = map_season_to_rus(get_season(datetime.datetime.now().month))
+                current_season = map_season_to_rus(get_season(datetime.now().month))
                 st.write(f"Текущий сезон: {current_season}")
                 st.markdown("</div>", unsafe_allow_html=True)
 
-            with col2:
+            with col_mon_2:
                 st.markdown("<div class='card'>", unsafe_allow_html=True)
-                current_season_eng = get_season(datetime.datetime.now().month)
+                current_season_eng = get_season(datetime.now().month)
                 current_city_data = df[df['city'] == selected_city]
                 seasonal_data = current_city_data[current_city_data['season'] == current_season_eng]
                 if not seasonal_data.empty:
@@ -419,6 +423,7 @@ def monitoring_tab():
                 else:
                     st.warning("Недостаточно данных для сравнения с текущим сезоном")
                 st.markdown("</div>", unsafe_allow_html=True)
+
         else:
             error_handled = True
             if response is None:
@@ -427,38 +432,35 @@ def monitoring_tab():
                 try:
                     err_data = response.json()
                     if response.status_code == 401 and "Invalid API key" in err_data.get("message", ""):
-                        st.error(f"401. Invalid API key. Please see https://openweathermap.org/faq#error401 for more info.")
+                        st.error("401. Invalid API key. Please see https://openweathermap.org/faq#error401 for more info.")
                     elif response.status_code == 404:
                         st.error("Город не найден. Проверьте корректность названия города.")
                     else:
                         st.error(f"Ошибка API: {response.status_code}. {err_data.get('message','')}")
                 except Exception:
                     st.error(f"Ошибка API: {response.status_code}")
-    except Exception as e:
-        if not 'error_handled' in locals() or not error_handled:
-            st.error(f"Ошибка при получении данных: {str(e)}")
+    except Exception as exc:
+        if 'error_handled' not in locals() or not error_handled:
+            st.error(f"Ошибка при получении данных: {str(exc)}")
 
 def heatmap_tab():
     """
-    Отображение тепловой карты температур по городам за выбранный период.
-    Включает сводную статистику для каждого города, а также дополнительную тепловую карту
-    только для выбранного города и выбранного периода (если период не указан – используется весь период с данными).
+    Отображение тепловой карты температур по городам за выбранный период
+    и дополнительная тепловая карта только для выбранного города.
     """
     st.markdown("<h2 class='subheader'>Тепловая карта</h2>", unsafe_allow_html=True)
-    
-    # Тепловая карта по всем городам
     period_start = st.date_input("Начало периода для тепловой карты (все города)", value=start_date, key="all_start")
     period_end = st.date_input("Конец периода для тепловой карты (все города)", value=end_date, key="all_end")
-    
+
     heatmap_data = df.copy()
     heatmap_data['date'] = pd.to_datetime(heatmap_data['timestamp']).dt.date
     date_mask = (heatmap_data['date'] >= period_start) & (heatmap_data['date'] <= period_end)
     heatmap_data = heatmap_data[date_mask]
-    
+
     pivot_data = heatmap_data.pivot_table(
-        index='city', 
-        columns='date', 
-        values='temperature', 
+        index='city',
+        columns='date',
+        values='temperature',
         aggfunc='mean'
     ).round(1)
     if pivot_data.empty:
@@ -466,12 +468,12 @@ def heatmap_tab():
     else:
         pivot_data = pivot_data.reindex(sorted(pivot_data.index), axis=0)
         pivot_data = pivot_data.reindex(sorted(pivot_data.columns), axis=1)
-        x_labels = [date.strftime("%d %b %Y") for date in pivot_data.columns]
+        x_labels = [dt.strftime("%d %b %Y") for dt in pivot_data.columns]
         try:
             selected_index = list(pivot_data.index).index(selected_city)
         except ValueError:
             selected_index = None
-        fig = px.imshow(
+        fig_heat = px.imshow(
             pivot_data.values,
             labels=dict(x="Дата", y="Город", color="Температура (°C)"),
             x=x_labels,
@@ -481,13 +483,12 @@ def heatmap_tab():
             zmax=40,
             aspect="auto"
         )
-        # Применяем зум по оси X, если даты попадают в диапазон
-        start_zoom = datetime.date(2010, 1, 1)
-        end_zoom = datetime.date(2020, 12, 31)
-        dates = list(pivot_data.columns)
-        start_index = next((i for i, d in enumerate(dates) if d >= start_zoom), 0)
-        end_index = next((i for i, d in enumerate(dates) if d > end_zoom), len(dates)) - 1
-        fig.update_layout(
+        start_zoom = date(2010, 1, 1)
+        end_zoom = date(2020, 12, 31)
+        dates_list = list(pivot_data.columns)
+        start_index = next((i for i, d in enumerate(dates_list) if d >= start_zoom), 0)
+        end_index = next((i for i, d in enumerate(dates_list) if d > end_zoom), len(dates_list)) - 1
+        fig_heat.update_layout(
             title="Тепловая карта температур по городам",
             height=600,
             xaxis=dict(
@@ -501,21 +502,21 @@ def heatmap_tab():
                 title="°C",
                 thicknessmode="pixels",
                 thickness=20,
-                lenmode="pixels", 
+                lenmode="pixels",
                 len=500
             )
         )
         for i in range(1, len(pivot_data.index)):
-            fig.add_shape(
+            fig_heat.add_shape(
                 type="line",
                 x0=-0.5,
-                x1=len(x_labels)-0.5,
+                x1=len(x_labels) - 0.5,
                 y0=i - 0.5,
                 y1=i - 0.5,
                 line=dict(color="black", width=1, dash="dash")
             )
         if selected_index is not None:
-            fig.add_shape(
+            fig_heat.add_shape(
                 type="rect",
                 x0=-0.5,
                 x1=len(x_labels) - 0.5,
@@ -524,21 +525,18 @@ def heatmap_tab():
                 line=dict(color="black", width=2),
                 opacity=1
             )
-        st.plotly_chart(fig, use_container_width=True)
-    
+        st.plotly_chart(fig_heat, use_container_width=True)
+
     st.markdown("### Статистика температур по городам")
     stats_df = heatmap_data.groupby('city')['temperature'].agg(['min', 'mean', 'max']).round(1)
     stats_df.columns = ['Минимум (°C)', 'Среднее (°C)', 'Максимум (°C)']
     st.dataframe(stats_df, use_container_width=True)
 
-    # Дополнительная тепловая карта для выбранного города
     st.markdown("<hr>", unsafe_allow_html=True)
     st.markdown("<h2 class='subheader'>Тепловая карта для выбранного города</h2>", unsafe_allow_html=True)
-    
-    # Определяем доступный диапазон дат для выбранного города, если данные присутствуют
     city_df = df[df['city'] == selected_city].copy()
     if not city_df.empty:
-        city_df['date'] = pd.to_datetime(city_df['timestamp']).dt.date
+        city_df['date'] = city_df['timestamp'].dt.date
         city_min_date = city_df['date'].min()
         city_max_date = city_df['date'].max()
     else:
@@ -546,16 +544,15 @@ def heatmap_tab():
 
     city_period_start = st.date_input("Начало периода для выбранного города", value=city_min_date, key="city_start")
     city_period_end = st.date_input("Конец периода для выбранного города", value=city_max_date, key="city_end")
-    
+
     city_heat_data = city_df.copy()
     city_date_mask = (city_heat_data['date'] >= city_period_start) & (city_heat_data['date'] <= city_period_end)
     city_heat_data = city_heat_data[city_date_mask]
-    
+
     if city_heat_data.empty:
         st.warning("Недостаточно данных для выбранного города в выбранном периоде")
         return
 
-    # Построение сводной таблицы для выбранного города
     pivot_city = city_heat_data.pivot_table(
         index='city',
         columns='date',
@@ -563,8 +560,8 @@ def heatmap_tab():
         aggfunc='mean'
     ).round(1)
     pivot_city = pivot_city.reindex(sorted(pivot_city.columns), axis=1)
-    x_labels_city = [date.strftime("%d %b %Y") for date in pivot_city.columns]
-    
+    x_labels_city = [dt.strftime("%d %b %Y") for dt in pivot_city.columns]
+
     fig_city = px.imshow(
         pivot_city.values,
         labels=dict(x="Дата", y="Город", color="Температура (°C)"),
@@ -588,41 +585,38 @@ def heatmap_tab():
             title="°C",
             thicknessmode="pixels",
             thickness=20,
-            lenmode="pixels", 
+            lenmode="pixels",
             len=300
         )
     )
     st.plotly_chart(fig_city, use_container_width=True)
-    
+
     st.markdown("### Статистика температур для выбранного города")
     city_stats = city_heat_data['temperature'].agg(['min', 'mean', 'max']).round(1)
     stats_city_df = pd.DataFrame(city_stats).transpose()
     stats_city_df.columns = ['Минимум (°C)', 'Среднее (°C)', 'Максимум (°C)']
     st.dataframe(stats_city_df, use_container_width=True)
 
-def export_data_tab(full_df: pd.DataFrame, city_df: pd.DataFrame, seasonal_df: pd.DataFrame, selected_city: str) -> None:
+def export_data_tab(full_df: pd.DataFrame, city_df_: pd.DataFrame, seasonal_df: pd.DataFrame, current_city: str) -> None:
     """
-    Отображает вкладку экспорта данных, предоставляя кнопки для скачивания полного датасета,
-    данных по выбранному городу, сезонных статистик и тепловой карты в формате CSV.
-
-    Параметры:
-        city_df (pd.DataFrame): Датасет с данными для выбранного города.
-        seasonal_df (pd.DataFrame): Сезонные статистики для всех городов.
-        selected_city (str): Название выбранного города.
+    Вкладка экспорта данных:
+    - Полный датасет,
+    - Данные по выбранному городу,
+    - Сезонные статистики.
     """
     st.markdown("<h2 class='subheader'>Экспорт данных</h2>", unsafe_allow_html=True)
-    
-    def convert_df_to_csv(df: pd.DataFrame) -> bytes:
-        return df.to_csv(index=False).encode('utf-8')
-    
-    csv_city = convert_df_to_csv(city_df)
+
+    def convert_df_to_csv(df_to_convert: pd.DataFrame) -> bytes:
+        return df_to_convert.to_csv(index=False).encode('utf-8')
+
+    csv_city = convert_df_to_csv(city_df_)
     st.download_button(
-        label=f"Скачать данные по городу {selected_city} (CSV)",
+        label=f"Скачать данные по городу {current_city} (CSV)",
         data=csv_city,
-        file_name=f"temperature_data_{selected_city}.csv",
+        file_name=f"temperature_data_{current_city}.csv",
         mime="text/csv"
     )
-    
+
     csv_seasonal = convert_df_to_csv(seasonal_df)
     st.download_button(
         label="Скачать сезонные статистики (CSV)",
@@ -630,10 +624,7 @@ def export_data_tab(full_df: pd.DataFrame, city_df: pd.DataFrame, seasonal_df: p
         file_name="seasonal_statistics.csv",
         mime="text/csv"
     )
-    
-# ----------------------- Основа -----------------------
 
-# Создание четырех вкладок для различных отображений
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["Временной ряд", "Аномалии", "Текущий мониторинг", "Тепловая карта", "Экспорт данных"])
 with tab1:
     time_series_tab()
