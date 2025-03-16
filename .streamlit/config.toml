@@ -1,0 +1,6 @@
+[server]
+headless = true
+port = $PORT
+enableCORS = false
+# Убедитесь, что main.py находится в корневой папке
+mainScript = "main.py"
