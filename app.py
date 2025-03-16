@@ -12,6 +12,7 @@ import altair as alt
 import streamlit as st
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from datetime import datetime, timedelta
+import datetime
 
 st.set_page_config(
     page_title="Анализ температур",
@@ -362,12 +363,93 @@ def monitoring_tab():
         if not 'error_handled' in locals() or not error_handled:
             st.error(f"Ошибка при получении данных: {str(e)}")
 
-# Layout
+def heatmap_tab():
+    st.markdown("<h2 class='subheader'>Тепловая карта температур</h2>", unsafe_allow_html=True)
 
-tab1, tab2, tab3 = st.tabs(["Временной ряд", "Аномалии", "Текущий мониторинг"])
+    heatmap_data = df.copy()
+    heatmap_data['date'] = pd.to_datetime(heatmap_data['timestamp']).dt.date
+    date_mask = (heatmap_data['date'] >= start_date) & (heatmap_data['date'] <= end_date)
+    heatmap_data = heatmap_data[date_mask]
+    pivot_data = heatmap_data.pivot_table(
+        index='city', 
+        columns='date', 
+        values='temperature', 
+        aggfunc='mean'
+    ).round(1)
+    if pivot_data.empty:
+        st.warning("Недостаточно данных для построения тепловой карты в выбранном периоде")
+        return
+    pivot_data = pivot_data.reindex(sorted(pivot_data.index), axis=0)
+    pivot_data = pivot_data.reindex(sorted(pivot_data.columns), axis=1)
+    x_labels = [date.strftime("%d %b %Y") for date in pivot_data.columns]
+    try:
+        selected_index = list(pivot_data.index).index(selected_city)
+    except ValueError:
+        selected_index = None
+    fig = px.imshow(
+        pivot_data.values,
+        labels=dict(x="Дата", y="Город", color="Температура (°C)"),
+        x=x_labels,
+        y=pivot_data.index,
+        color_continuous_scale='RdBu_r',
+        zmin=-30,
+        zmax=40,
+        aspect="auto"
+    )
+    start_zoom = datetime.date(2010, 1, 1)
+    end_zoom = datetime.date(2020, 12, 31)
+    dates = list(pivot_data.columns)
+    start_index = next((i for i, d in enumerate(dates) if d >= start_zoom), 0)
+    end_index = next((i for i, d in enumerate(dates) if d > end_zoom), len(dates)) - 1
+    fig.update_layout(
+        title="Тепловая карта температур по городам",
+        height=600,
+        xaxis=dict(
+            tickangle=-45,
+            tickmode="array",
+            tickvals=list(range(len(x_labels))),
+            ticktext=x_labels,
+            range=[start_index - 0.5, end_index + 0.5] if start_index < end_index else None
+        ),
+        coloraxis_colorbar=dict(
+            title="°C",
+            thicknessmode="pixels",
+            thickness=20,
+            lenmode="pixels", 
+            len=500
+        )
+    )
+    for i in range(1, len(pivot_data.index)):
+        fig.add_shape(
+            type="line",
+            x0=-0.5,
+            x1=len(x_labels)-0.5,
+            y0=i - 0.5,
+            y1=i - 0.5,
+            line=dict(color="black", width=1, dash="dash")
+        )
+    if selected_index is not None:
+        fig.add_shape(
+            type="rect",
+            x0=-0.5,
+            x1=len(x_labels) - 0.5,
+            y0=selected_index - 0.5,
+            y1=selected_index + 0.5,
+            line=dict(color="black", width=2),
+            opacity=1
+        )
+    st.plotly_chart(fig, use_container_width=True)
+    st.markdown("### Статистика температур по городам")
+    stats_df = heatmap_data.groupby('city')['temperature'].agg(['min', 'mean', 'max']).round(1)
+    stats_df.columns = ['Минимум (°C)', 'Среднее (°C)', 'Максимум (°C)']
+    st.dataframe(stats_df, use_container_width=True)
+
+tab1, tab2, tab3, tab4 = st.tabs(["Временной ряд", "Аномалии", "Текущий мониторинг", "Тепловая карта"])
 with tab1:
     time_series_tab()
 with tab2:
     anomalies_tab()
 with tab3:
     monitoring_tab()
+with tab4:
+    heatmap_tab()
