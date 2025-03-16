@@ -27,7 +27,6 @@
    - **Аномалии** (файл `anomalies_tab.py`)
    - **Мониторинг** (файл `monitoring_tab.py`)
    - **Тепловая карта** (файл `heatmap_tab.py`)
-   - **Экспорт данных** (файл `export_data_tab.py`)
 
 ## Структура проекта
 
@@ -38,8 +37,6 @@ c:\!КНАД\code\streamlit_hw\
 ├── README.md             
 └── app\
     ├── app.py            
-    ├── anomalies_tab.py  
-    ├── export_data_tab.py
     ├── heatmap_tab.py   
     ├── helper_functions.py
     ├── monitoring_tab.py 
@@ -61,9 +58,6 @@ c:\!КНАД\code\streamlit_hw\
 
 - **app/anomalies_tab.py**  
   Отвечает за отображение обнаруженных аномальных значений температуры. Форматирует и выводит данные с отметкой времени.
-
-- **app/export_data_tab.py**  
-  Обеспечивает экспорт выборочных данных и сезонных статистик в формате CSV.
 
 - **app/heatmap_tab.py**  
   Создает интерактивные тепловые карты для визуализации распределения температур по городам и по датам.
