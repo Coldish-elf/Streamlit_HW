@@ -74,6 +74,21 @@ def prepare_city_data(df, city_name, period_start, period_end, agg_frequency='D'
     
     return city_filtered, min_date, max_date
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def prepare_city_data_by_day_month_year(df, city_name):
+    """Prepare city data for showing day-month on x-axis and years on y-axis"""
+    city_df = df[df['city'] == city_name]
+    
+    if city_df.empty:
+        return None
+    
+    city_df['year'] = pd.to_datetime(city_df['timestamp']).dt.year
+    city_df['day_month'] = pd.to_datetime(city_df['timestamp']).dt.strftime("%d %b")
+    
+    city_agg = city_df.groupby(['year', 'day_month'])['temperature'].mean().reset_index()
+    
+    return city_agg
+
 def format_x_labels(dates, agg_frequency):
     if agg_frequency == 'D':
         return [dt.strftime("%d %b %Y") for dt in dates]
@@ -92,18 +107,28 @@ def to_date(timestamp_or_date):
 def heatmap_tab(df, selected_city, start_date, end_date):
     st.markdown("<h2 class='subheader'>Тепловая карта</h2>", unsafe_allow_html=True)
     
-    aggregation_options = {
-        "День": "D", 
-        "Неделя": "W-MON", 
-        "Месяц": "MS"
-    }
-    time_aggregation = st.radio(
-        "Агрегация данных по временному периоду:",
-        options=list(aggregation_options.keys()),
+    use_aggregation = st.radio(
+        "Использовать агрегацию данных?",
+        options=["Да", "Нет"],
         horizontal=True,
-        index=2  # Default to "Месяц" (index 2)
-    )
-    agg_frequency = aggregation_options[time_aggregation]
+        index=0 
+    ) == "Да"
+    
+    if use_aggregation:
+        aggregation_options = {
+            "День": "D", 
+            "Неделя": "W-MON", 
+            "Месяц": "MS"
+        }
+        time_aggregation = st.radio(
+            "Агрегация данных по временному периоду:",
+            options=list(aggregation_options.keys()),
+            horizontal=True,
+            index=2  
+        )
+        agg_frequency = aggregation_options[time_aggregation]
+    else:
+        agg_frequency = "D"  
     
     period_start = st.date_input("Начало периода для тепловой карты (все города)", value=start_date, key="all_start")
     period_end = st.date_input("Конец периода для тепловой карты (все города)", value=end_date, key="all_end")
@@ -198,45 +223,32 @@ def heatmap_tab(df, selected_city, start_date, end_date):
     st.markdown("<h2 class='subheader'>Тепловая карта для выбранного города</h2>", unsafe_allow_html=True)
     
     with st.spinner("Подготовка данных для выбранного города..."):
-        city_filtered_data, city_min_date, city_max_date = prepare_city_data(df, selected_city, period_start, period_end, agg_frequency)
+        city_data = prepare_city_data_by_day_month_year(df, selected_city)
     
-    if city_max_date:
-        city_period_end = city_max_date
-        city_period_start = max(city_min_date, (city_max_date - timedelta(days=365)))
-        
-        city_period_start = st.date_input("Начало периода для выбранного города (1 год данных)", value=city_period_start, key="city_start")
-        city_period_end = st.date_input("Конец периода для выбранного города", value=city_period_end, key="city_end")
-        
-        with st.spinner("Обновление данных для выбранного периода..."):
-            city_filtered_data, _, _ = prepare_city_data(df, selected_city, city_period_start, city_period_end, agg_frequency)
-    else:
-        city_period_start = st.date_input("Начало периода для выбранного города", value=start_date, key="city_start")
-        city_period_end = st.date_input("Конец периода для выбранного города", value=end_date, key="city_end")
-    
-    if city_filtered_data is None:
-        st.warning("Недостаточно данных для выбранного города в выбранном периоде")
+    if city_data is None or city_data.empty:
+        st.warning("Недостаточно данных для выбранного города")
         return
     
-    pivot_city = city_filtered_data.pivot_table(
-        index='city',
-        columns='date',
+    pivot_city = city_data.pivot_table(
+        index='year',
+        columns='day_month',
         values='temperature',
         aggfunc='mean'
     ).round(1)
     
-    pivot_city = pivot_city.reindex(sorted(pivot_city.columns), axis=1)
-    
     if pivot_city.empty:
-        st.warning("Недостаточно данных для выбранного города в выбранном периоде")
+        st.warning("Недостаточно данных для выбранного города")
         return
-        
-    x_labels_city = format_x_labels(pivot_city.columns, agg_frequency)
+
+    month_day_order = pd.to_datetime(pivot_city.columns.map(lambda x: f"{x} 2000"), format="%d %b %Y").sort_values()
+    column_order = month_day_order.strftime("%d %b").tolist()
+    pivot_city = pivot_city[column_order]
     
     with st.spinner("Создание тепловой карты для города..."):
         fig_city = px.imshow(
             pivot_city.values,
-            labels=dict(x="Дата", y="Город", color="Температура (°C)"),
-            x=x_labels_city,
+            labels=dict(x="День-Месяц", y="Год", color="Температура (°C)"),
+            x=pivot_city.columns,
             y=pivot_city.index,
             color_continuous_scale='RdBu_r',
             zmin=-30,
@@ -245,28 +257,28 @@ def heatmap_tab(df, selected_city, start_date, end_date):
         )
         
         fig_city.update_layout(
-            title=f"Тепловая карта для города {selected_city}",
-            height=300,
+            title=f"Тепловая карта для города {selected_city} по годам",
+            height=500,
             xaxis=dict(
                 tickangle=-45,
                 tickmode="array",
-                tickvals=list(range(len(x_labels_city))),
-                ticktext=x_labels_city
+                tickvals=list(range(len(pivot_city.columns))),
+                ticktext=pivot_city.columns
             ),
             coloraxis_colorbar=dict(
                 title="°C",
                 thicknessmode="pixels",
                 thickness=20,
                 lenmode="pixels",
-                len=300
+                len=500
             )
         )
     
     st.plotly_chart(fig_city, use_container_width=True)
 
-    st.markdown("### Статистика температур для выбранного города")
+    st.markdown("### Статистика температур для выбранного города (все годы)")
     with st.spinner("Расчет статистики для города..."):
-        city_stats = city_filtered_data['temperature'].agg(['min', 'mean', 'max']).round(1)
+        city_stats = city_data['temperature'].agg(['min', 'mean', 'max']).round(1)
         stats_city_df = pd.DataFrame(city_stats).transpose()
         stats_city_df.columns = ['Минимум (°C)', 'Среднее (°C)', 'Максимум (°C)']
     

@@ -114,8 +114,7 @@ def test_api_key(api_key: str) -> bool:
         if response.status_code == 200:
             st.info("API ключ введен ✓")
             return True
-        st.error("Неверный API ключ! Проверьте корректность ключа "
-                 "[подробнее](https://openweathermap.org/faq#error401)")
+        st.error("401. Invalid API key. Please see https://openweathermap.org/faq#error401 for more info.")
     except Exception as exc:
         st.error(f"Ошибка при проверке API ключа: {exc}")
     return False

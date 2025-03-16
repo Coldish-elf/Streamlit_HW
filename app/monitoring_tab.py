@@ -4,11 +4,11 @@ import streamlit as st
 from datetime import datetime
 from .helper_functions import test_api_key, fetch_current_temp_async, get_season, map_season_to_rus
 
-@st.cache_data(ttl=300)  # Cache data for 5 minutes
+@st.cache_data(ttl=300) 
 def fetch_weather_sync(base_url, params):
     return requests.get(base_url, params=params)
 
-@st.cache_data(ttl=300)  # Cache data for 5 minutes
+@st.cache_data(ttl=300)
 async def fetch_weather_async(city, api_key):
     return await fetch_current_temp_async(city, api_key)
 

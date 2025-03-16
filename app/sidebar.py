@@ -91,7 +91,7 @@ def render_sidebar():
         parallel_method = st.sidebar.radio("Выберите метод параллельных вычислений", ("ThreadPoolExecutor", "multiprocessing"))
 
         start_seq = time.time()
-        _ = df.groupby('city').apply(lambda group: group.copy())  # placeholder
+        _ = df.groupby('city').apply(lambda group: group.copy())
         time_seq = time.time() - start_seq
 
         time_par = run_parallel_processing(df, parallel_method)
@@ -103,7 +103,6 @@ def render_sidebar():
         st.sidebar.write(f"Параллельный расчёт ({parallel_method}): {time_par:.3f} сек")
         st.sidebar.write(f"Ускорение: x{time_seq / max(time_par, 0.001):.1f}")
 
-    # Возвращаем нужные объекты для дальнейшего использования
     return {
         "df": df,
         "selected_city": selected_city,

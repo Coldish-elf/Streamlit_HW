@@ -109,7 +109,6 @@ def run_app():
     
     with tabs[3]:
         st.session_state.active_tab = 3
-        # Теперь heatmap загружается только когда вкладка активна
         heatmap_tab(df, selected_city, start_date, end_date)
 
 if __name__ == "__main__":
