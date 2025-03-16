@@ -6,13 +6,40 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import time
 import sys
 
+def raw_process_group(group):
+    return group.copy()
+
+@st.cache_data
+def process_group(group):
+    return group.copy()
+
+@st.cache_data
+def process_uploaded_file(df):
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    df['season'] = df['timestamp'].dt.month.apply(get_season)
+    return df
+
+@st.cache_data
+def run_parallel_processing(df, parallel_method):
+    if parallel_method == "ThreadPoolExecutor":
+        start_par = time.time()
+        with ThreadPoolExecutor() as executor:
+            futures = [executor.submit(process_group, group) for _, group in df.groupby('city')]
+            _ = [f.result() for f in futures]
+        return time.time() - start_par
+    else:
+        start_par = time.time()
+        with ProcessPoolExecutor() as executor:
+            futures = [executor.submit(raw_process_group, group) for _, group in df.groupby('city')]
+            _ = [f.result() for f in futures]
+        return time.time() - start_par
+
 def render_sidebar():
     st.sidebar.header("Панель управления")
     uploaded_file = st.sidebar.file_uploader("Загрузите собственный датасет (CSV)", type=["csv"])
     if uploaded_file:
         df = pd.read_csv(uploaded_file)
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        df['season'] = df['timestamp'].dt.month.apply(get_season)
+        df = process_uploaded_file(df)
     else:
         df = load_default_data()
 
@@ -42,17 +69,20 @@ def render_sidebar():
             st.sidebar.error("Для сравнения методов требуется корректный API-ключ!")
         else:
             test_cities = ["Berlin", "Moscow", "Beijing", "Dubai", "Cairo"]
-            with st.sidebar.spinner("Тестируем методы..."):
-                try:
-                    asyncio.run(compare_fetch_methods(test_cities, api_key))
-                except Exception as exc:
-                    if "401" in str(exc):
-                        st.sidebar.error(
-                            "Неверный API-ключ! "
-                            "Проверьте корректность ключа [подробнее](https://openweathermap.org/faq#error401)"
-                        )
-                    else:
-                        st.sidebar.error(f"Ошибка тестирования: {str(exc)}")
+            status_placeholder = st.sidebar.empty()
+            status_placeholder.info("Тестируем методы...")
+            try:
+                asyncio.run(compare_fetch_methods(test_cities, api_key))
+                status_placeholder.empty()
+            except Exception as exc:
+                status_placeholder.empty()
+                if "401" in str(exc):
+                    st.sidebar.error(
+                        "401. Invalid API key. "
+                        "Please see [more info](https://openweathermap.org/faq#error401)"
+                    )
+                else:
+                    st.sidebar.error(f"Ошибка тестирования: {str(exc)}")
 
     st.sidebar.subheader("Сравнение производительности анализа")
     parallel_compare = st.sidebar.checkbox("Сравнить последовательный и параллельный расчёт для всех городов")
@@ -64,20 +94,10 @@ def render_sidebar():
         _ = df.groupby('city').apply(lambda group: group.copy())  # placeholder
         time_seq = time.time() - start_seq
 
-        if parallel_method == "ThreadPoolExecutor":
-            start_par = time.time()
-            with ThreadPoolExecutor() as executor:
-                futures = [executor.submit(lambda g: g.copy(), group) for _, group in df.groupby('city')]
-                _ = [f.result() for f in futures]
-            time_par = time.time() - start_par
-        else:
-            start_par = time.time()
-            with ProcessPoolExecutor() as executor:
-                futures = [executor.submit(lambda g: g.copy(), group) for _, group in df.groupby('city')]
-                _ = [f.result() for f in futures]
-            time_par = time.time() - start_par
-            if sys.platform.startswith('win'):
-                st.sidebar.warning("На Windows multiprocessing может иметь большие расходы для меньших данных.")
+        time_par = run_parallel_processing(df, parallel_method)
+        
+        if parallel_method == "multiprocessing" and sys.platform.startswith('win'):
+            st.sidebar.warning("На Windows multiprocessing может иметь большие расходы для меньших данных.")
 
         st.sidebar.write(f"Последовательный расчёт: {time_seq:.3f} сек")
         st.sidebar.write(f"Параллельный расчёт ({parallel_method}): {time_par:.3f} сек")

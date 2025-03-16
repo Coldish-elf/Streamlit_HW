@@ -4,6 +4,14 @@ import streamlit as st
 from datetime import datetime
 from .helper_functions import test_api_key, fetch_current_temp_async, get_season, map_season_to_rus
 
+@st.cache_data(ttl=300)  # Cache data for 5 minutes
+def fetch_weather_sync(base_url, params):
+    return requests.get(base_url, params=params)
+
+@st.cache_data(ttl=300)  # Cache data for 5 minutes
+async def fetch_weather_async(city, api_key):
+    return await fetch_current_temp_async(city, api_key)
+
 def monitoring_tab(api_key, selected_city, df, fetch_method):
     st.markdown("<h2 class='subheader'>Мониторинг текущей температуры</h2>", unsafe_allow_html=True)
     if not api_key or not test_api_key(api_key):
@@ -16,9 +24,9 @@ def monitoring_tab(api_key, selected_city, df, fetch_method):
     try:
         with st.spinner("Получение текущих данных..."):
             if fetch_method == "Синхронный":
-                response = requests.get(base_url, params=params)
+                response = fetch_weather_sync(base_url, params)
             else:
-                response = asyncio.run(fetch_current_temp_async(selected_city, api_key))
+                response = asyncio.run(fetch_weather_async(selected_city, api_key))
 
         if response and response.status_code == 200:
             current_data = response.json()

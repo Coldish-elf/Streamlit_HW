@@ -3,22 +3,34 @@ import plotly.express as px
 import pandas as pd
 from datetime import date
 
-def heatmap_tab(df, selected_city, start_date, end_date):
-    st.markdown("<h2 class='subheader'>Тепловая карта</h2>", unsafe_allow_html=True)
-    period_start = st.date_input("Начало периода для тепловой карты (все города)", value=start_date, key="all_start")
-    period_end = st.date_input("Конец периода для тепловой карты (все города)", value=end_date, key="all_end")
-
+@st.cache_data
+def prepare_heatmap_data(df, period_start, period_end):
     heatmap_data = df.copy()
     heatmap_data['date'] = pd.to_datetime(heatmap_data['timestamp']).dt.date
     date_mask = (heatmap_data['date'] >= period_start) & (heatmap_data['date'] <= period_end)
-    heatmap_data = heatmap_data[date_mask]
+    return heatmap_data[date_mask]
 
-    pivot_data = heatmap_data.pivot_table(
+@st.cache_data
+def create_pivot_table(heatmap_data):
+    return heatmap_data.pivot_table(
         index='city',
         columns='date',
         values='temperature',
         aggfunc='mean'
     ).round(1)
+
+@st.cache_data
+def calculate_stats(heatmap_data):
+    return heatmap_data.groupby('city')['temperature'].agg(['min', 'mean', 'max']).round(1)
+
+def heatmap_tab(df, selected_city, start_date, end_date):
+    st.markdown("<h2 class='subheader'>Тепловая карта</h2>", unsafe_allow_html=True)
+    period_start = st.date_input("Начало периода для тепловой карты (все города)", value=start_date, key="all_start")
+    period_end = st.date_input("Конец периода для тепловой карты (все города)", value=end_date, key="all_end")
+
+    heatmap_data = prepare_heatmap_data(df, period_start, period_end)
+    pivot_data = create_pivot_table(heatmap_data)
+    
     if pivot_data.empty:
         st.warning("Недостаточно данных для построения тепловой карты в выбранном периоде")
     else:
@@ -84,7 +96,7 @@ def heatmap_tab(df, selected_city, start_date, end_date):
         st.plotly_chart(fig_heat, use_container_width=True)
 
     st.markdown("### Статистика температур по городам")
-    stats_df = heatmap_data.groupby('city')['temperature'].agg(['min', 'mean', 'max']).round(1)
+    stats_df = calculate_stats(heatmap_data)
     stats_df.columns = ['Минимум (°C)', 'Среднее (°C)', 'Максимум (°C)']
     st.dataframe(stats_df, use_container_width=True)
 

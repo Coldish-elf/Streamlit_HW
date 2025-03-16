@@ -28,6 +28,7 @@ def load_csv_data(path: str) -> pd.DataFrame:
 def load_default_data() -> pd.DataFrame:
     return load_csv_data("temperature_data.csv")
 
+@st.cache_data
 def compute_rolling_stats(group: pd.DataFrame) -> pd.DataFrame:
     rolling_window = 30
     group = group.sort_values('timestamp').copy()
