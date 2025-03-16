@@ -98,10 +98,13 @@ async def compare_fetch_methods(cities: list, api_key: str):
             params={"q": city, "appid": api_key, "units": "metric"}
         )
     sync_time = time.time() - start
-
-    st.write(f"Асинхронный метод: {async_time:.3f} сек")
-    st.write(f"Синхронный метод: {sync_time:.3f} сек")
-    st.write(f"Ускорение: x{sync_time / max(async_time, 0.001):.1f}")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.write(f"Асинхронный метод: {async_time:.3f} сек")
+    with col2:    
+        st.write(f"Синхронный метод: {sync_time:.3f} сек")
+    with col3:
+        st.write(f"Ускорение: x{sync_time / max(async_time, 0.001):.1f}")
     # Асинхронный метод быстрее для нескольких городов благодаря параллельным запросам.
     return async_time, sync_time
 
