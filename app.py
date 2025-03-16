@@ -299,8 +299,8 @@ def anomalies_tab():
 
 def monitoring_tab():
     st.markdown("<h2 class='subheader'>Мониторинг текущей температуры</h2>", unsafe_allow_html=True)
-    if not api_key:
-        st.info("Введите API ключ в боковой панели для просмотра текущей температуры")
+    if not api_key or not test_api_key(api_key):
+        st.info("Введите корректный API ключ в боковой панели для просмотра текущей температуры")
         return
 
     base_url = "https://api.openweathermap.org/data/2.5/weather"
@@ -364,12 +364,16 @@ def monitoring_tab():
             st.error(f"Ошибка при получении данных: {str(e)}")
 
 def heatmap_tab():
-    st.markdown("<h2 class='subheader'>Тепловая карта температур</h2>", unsafe_allow_html=True)
-
+    st.markdown("<h2 class='subheader'>Тепловая карта</h2>", unsafe_allow_html=True)
+    
+    period_start = st.date_input("Начало периода для тепловой карты", value=start_date)
+    period_end = st.date_input("Конец периода для тепловой карты", value=end_date)
+    
     heatmap_data = df.copy()
     heatmap_data['date'] = pd.to_datetime(heatmap_data['timestamp']).dt.date
-    date_mask = (heatmap_data['date'] >= start_date) & (heatmap_data['date'] <= end_date)
+    date_mask = (heatmap_data['date'] >= period_start) & (heatmap_data['date'] <= period_end)
     heatmap_data = heatmap_data[date_mask]
+    
     pivot_data = heatmap_data.pivot_table(
         index='city', 
         columns='date', 
